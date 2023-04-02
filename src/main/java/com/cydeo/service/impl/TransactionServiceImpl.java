@@ -1,10 +1,13 @@
 package com.cydeo.service.impl;
 
-import com.cydeo.exception.BadRequestException;
+import com.cydeo.enums.AccountType;
+import com.cydeo.exception.*;
 import com.cydeo.model.Account;
 import com.cydeo.model.Transaction;
 import com.cydeo.repository.AccountRepository;
+import com.cydeo.repository.TransactionRepository;
 import com.cydeo.service.TransactionService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -15,10 +18,16 @@ import java.util.UUID;
 @Component
 public class TransactionServiceImpl implements TransactionService {
 
-    private  final  AccountRepository accountRepository;
 
-    public TransactionServiceImpl(AccountRepository accountRepository) {
+    @Value("${under_construction}")
+    private boolean underConstruction;
+
+    private final AccountRepository accountRepository;
+    private final TransactionRepository transactionRepository;
+
+    public TransactionServiceImpl(AccountRepository accountRepository, TransactionRepository transactionRepository) {
         this.accountRepository = accountRepository;
+        this.transactionRepository = transactionRepository;
     }
 
     @Override
@@ -32,9 +41,51 @@ public class TransactionServiceImpl implements TransactionService {
 
         */
 
-        validateAccount(sender, receiver);
+        if(!underConstruction) {
 
-        return null;
+            validateAccount(sender, receiver);
+            checkAccountOwnership(sender, receiver);
+            executeBalanceAndUpdateIfRequired(amount, sender, receiver);
+
+
+            Transaction transaction = Transaction.builder().amount(amount).sender(sender.getId())
+                    .receiver(receiver.getId()).creationDate(creeationDate).message(message).build();
+
+            return transactionRepository.save(transaction);
+
+        }else{
+           throw new UnderConstructionException("App is under construction, try again later.");
+        }
+
+    }
+
+    private void executeBalanceAndUpdateIfRequired(BigDecimal amount, Account sender, Account receiver) {
+        if(checkSenderBalance(sender,amount)){
+            //make balance transfer between sender and receiver
+            sender.setBalance(sender.getBalance().subtract(amount));
+            receiver.setBalance(receiver.getBalance().add(amount));
+        }else{
+            //throw BalanceNotSufficientException
+            throw new BalanceNotSufficientException("Balance is not enough for this transfer.");
+        }
+    }
+
+    private boolean checkSenderBalance(Account sender, BigDecimal amount) {
+        //verify sender has enough balance to send
+
+        return sender.getBalance().subtract(amount).compareTo(BigDecimal.ZERO)>=0;
+    }
+
+    private void checkAccountOwnership(Account sender, Account receiver) {
+        /*
+            write an if statement that checks if one of the account is saving,
+            and user of sender or receiver is not the same, throw AccountOwnershipException
+         */
+
+        if((sender.getAccountType().equals(AccountType.SAVING)||receiver.getAccountType().equals(AccountType.SAVING))
+                && !sender.getUserId().equals(receiver.getUserId())){
+            throw new AccountOwnershipException("Since you are using a savings account, the sender and receiver userId must be the same.");
+        }
 
     }
 
@@ -65,6 +116,6 @@ public class TransactionServiceImpl implements TransactionService {
 
     @Override
     public List<Transaction> findAllTransaction() {
-        return null;
+        return transactionRepository.findAll();
     }
 }
